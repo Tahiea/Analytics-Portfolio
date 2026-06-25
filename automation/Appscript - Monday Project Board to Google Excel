@@ -1,0 +1,159 @@
+/**
+ * Fetch data from multiple Monday.com boards via a cursor-based paginated GraphQL query,
+ * and write each board’s data to a separate sheet (tab) in the master spreadsheet.
+ * Each run clears the existing data and creates a new snapshot of the board.
+ *
+ * This version uses batch writing to speed up execution.
+ */
+function updateMondayData() {
+  // === CONFIGURATION ===
+  var apiKey = ''; // Replace with your Monday.com API key
+  var boardIds = [A, B, C, D]; // Replace with your Monday board IDs
+  var extractionDate = new Date(); // Date when data is extracted
+  var url = "https://api.monday.com/v2";
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  boardIds.forEach(function(boardId) {
+    // Define sheet name for the board; clear if it exists or create a new one.
+    var sheetName = "Board_" + boardId;
+    var sheet = ss.getSheetByName(sheetName) || ss.insertSheet(sheetName);
+    sheet.clear();
+   
+    // Base headers
+    var baseHeaders = ["Extraction Date", "Group", "Item ID", "Item Name", "Updated At"];
+    var dynamicHeaders = [];
+    var allRows = [];  // To store all item rows
+
+    // Pagination variables
+    var hasMore = true;
+    var cursor = null;
+    var limit = 100;  // Maximum items per API call
+
+    // Loop to fetch all pages using cursor-based pagination.
+    while (hasMore) {
+      var query;
+      if (!cursor) {
+        // First page query using items_page
+        query = `
+        {
+          boards(ids: ${boardId}) {
+            id
+            name
+            items_page(limit: ${limit}) {
+              cursor
+              items {
+                id
+                name
+                updated_at
+                group { title }
+                column_values {
+                  id
+                  text
+                  column { id title }
+                  ... on BoardRelationValue { display_value }
+                  ... on MirrorValue { display_value }
+                }
+              }
+            }
+          }
+        }`;
+      } else {
+        // Subsequent pages using next_items_page query
+        query = `
+        {
+          next_items_page(cursor: "${cursor}", limit: ${limit}) {
+            cursor
+            items {
+              id
+              name
+              updated_at
+              group { title }
+              column_values {
+                id
+                text
+                column { id title }
+                ... on BoardRelationValue { display_value }
+                ... on MirrorValue { display_value }
+              }
+            }
+          }
+        }`;
+      }
+     
+      var options = {
+        method: "post",
+        contentType: "application/json",
+        headers: { "Authorization": apiKey },
+        payload: JSON.stringify({ query: query })
+      };
+     
+      try {
+        var response = UrlFetchApp.fetch(url, options);
+        var json = JSON.parse(response.getContentText());
+        var items;
+        if (!cursor) {
+          var boardData = json.data.boards[0];
+          var pageData = boardData.items_page;
+          items = pageData.items;
+          cursor = pageData.cursor;  // Might be null if no further pages.
+        } else {
+          var pageData = json.data.next_items_page;
+          items = pageData.items;
+          cursor = pageData.cursor;
+        }
+       
+        // If items are returned, process them; otherwise, stop.
+        if (items && items.length > 0) {
+          // Set dynamic headers from the first page only.
+          if (allRows.length === 0 && items[0].column_values && items[0].column_values.length > 0) {
+            items[0].column_values.forEach(function(cv) {
+              dynamicHeaders.push(cv.column.title);
+            });
+          }
+         
+          // Build rows for each item.
+          items.forEach(function(item) {
+            var row = [];
+            row.push(Utilities.formatDate(extractionDate, Session.getScriptTimeZone(), "yyyy-MM-dd HH:mm:ss"));
+            row.push(item.group && item.group.title ? item.group.title : "No Group");
+            row.push(item.id);
+            row.push(item.name);
+            row.push(item.updated_at);
+            if (item.column_values && item.column_values.length > 0) {
+              item.column_values.forEach(function(cv) {
+                // Prefer display_value if available, otherwise use text.
+                var value = cv.display_value ? cv.display_value : cv.text;
+                row.push(value);
+              });
+            }
+            allRows.push(row);
+          });
+         
+          // If no cursor returned, we've fetched all pages.
+          if (!cursor) {
+            hasMore = false;
+          }
+        } else {
+          hasMore = false;
+        }
+      } catch (e) {
+        Logger.log("Error fetching data for board " + boardId + ": " + e);
+        hasMore = false;
+      }
+    } // End pagination loop
+
+    // Create the header row: base headers + dynamic headers.
+    var headers = baseHeaders.concat(dynamicHeaders);
+    // Combine header row and data rows.
+    var outputData = [headers].concat(allRows);
+   
+    // Write the data in a single batch.
+    if (outputData.length > 0) {
+      sheet.getRange(1, 1, outputData.length, outputData[0].length).setValues(outputData);
+    }
+   
+    Logger.log("Board " + boardId + ": Total items fetched = " + allRows.length);
+  });
+}
+
+
