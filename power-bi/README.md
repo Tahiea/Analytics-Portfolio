@@ -1,3 +1,5 @@
+Details of the codes and the business logic are soon to be updated.
+
 ### Finance KPI: Revenue and Forecast Dashboard
 
 #### Key Business Questions Answered
