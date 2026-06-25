@@ -1,1 +1,1 @@
-Details of the codes and the business logic are soon to be updated.
+The workflow and the details are documented in the PNG file.
