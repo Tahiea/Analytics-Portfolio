@@ -1,0 +1,97 @@
+function sendNewRowsToMonday() {
+  const sheet = SpreadsheetApp
+    .getActiveSpreadsheet()
+    .getSheetByName("Register Your Interest_Zoho Integration_July 2025");
+  const data = sheet.getDataRange().getValues();
+  const headers = data[0];
+  const statusColIndex = 11;   // L column (zero-based) //-------------- status column
+
+  const boardId = 9705939119; //--------------------------------------- find board ID ---- this is the Website: Register Your Interest Board.
+  const groupId = "group_mkqxzy5f"; //--------------------------------- find group ID
+  const apiKey  = "";  // ------------------- Monday board API token consider storing securely
+
+  const headerToMondayMap = {            //---------------------------- Find the column IDs from Developer tab - API playground in Monday board
+    "Name":                  "name",
+    "Email":                 "email_mkmte73w",
+    "Job title":             "job_title_mkmtdw9g",
+    "Telephone":             "mobile_mkmtknre",
+    "Club name":             "organisation_mkmtz55x",
+    "Number of members":     "country_mkmtvkgd",
+    "Current club solution": "text_mks73drz",
+  };
+
+  for (let i = 1; i < data.length; i++) {
+    const row    = data[i];
+    const status = row[statusColIndex];
+    if (status === "Sent") continue;
+
+    let itemName      = "Untitled";
+    const columnValues = {};
+
+    for (let j = 0; j < headers.length; j++) {
+      const header      = headers[j];
+      const colId       = headerToMondayMap[header];
+      const cellValue   = row[j];
+
+      if (!colId || cellValue === "") continue;
+
+      // item_name field
+      if (colId === "name") {
+        itemName = String(cellValue);
+      }
+      // email column
+      else if (colId.indexOf("email_") === 0) {
+        columnValues[colId] = {
+          email: String(cellValue),
+          text:  String(cellValue)
+        };
+      }
+      // phone column
+      else if (colId.indexOf("mobile_") === 0) {
+        columnValues[colId] = {
+          phone: String(cellValue),
+          text:  String(cellValue)
+        };
+      }
+      // **all other columns are plain text** — pass a string directly
+      else {
+        columnValues[colId] = String(cellValue);
+      }
+    }
+
+    // GraphQL wants column_values as a JSON‐string literal:
+    const colValsJson = JSON.stringify(columnValues);
+    const query = `
+      mutation {
+      create_item (
+      board_id: ${boardId},
+      group_id: "${groupId}",
+      item_name: "${itemName.replace(/"/g, '\\"')}",
+      column_values: """${colValsJson}"""
+    ) {
+      id
+    }
+  }
+`;
+
+    Logger.log("Payload row " + (i+1) + ":\n" + query);
+
+    const res = UrlFetchApp.fetch("https://api.monday.com/v2", {
+      method:      "post",
+      contentType: "application/json",
+      headers:     { Authorization: apiKey },
+      payload:     JSON.stringify({ query })
+    });
+
+    const result = JSON.parse(res.getContentText());
+    Logger.log("Response row " + (i+1) + ": " + JSON.stringify(result));
+
+    if (result.data?.create_item?.id) {      //------------------------------------which column to update with 'sent'once data is sent over? P!
+      // mark Sent in column L (1-based col 16)
+      sheet.getRange(i + 1, 12).setValue("Sent");
+    } else {
+      Logger.log(`❌ Row ${i+1} error: ${JSON.stringify(result.errors)}`);
+    }
+  }
+}
+
