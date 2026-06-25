@@ -1,6 +1,6 @@
 ### Finance KPI: Revenue and Forecast Dashboard
 
-## Key Business Questions Answered
+#### Key Business Questions Answered
 
 The model was designed to support finance and commercial stakeholders in answering the following business questions:
 
